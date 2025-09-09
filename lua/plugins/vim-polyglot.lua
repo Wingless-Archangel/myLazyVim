@@ -1,3 +1,3 @@
 return {
-  "sheerun/vim-polyglot", enabled = false
+  "sheerun/vim-polyglot",
 }

@@ -34,7 +34,7 @@ return {
     cmd = { "TSUpdateSync" },
     keys = {
       { "<c-space>", desc = "Increment selection" },
-      { "<bs>", desc = "Decrement selection", mode = "x" },
+      { "<bs>",      desc = "Decrement selection", mode = "x" },
     },
     ---@type TSConfig
     ---@diagnostic disable-next-line: missing-fields
@@ -58,6 +58,7 @@ return {
         "python",
         "query",
         "regex",
+        "terraform",
         "toml",
         "tsx",
         "typescript",
