@@ -1,102 +1,120 @@
 return {
-  {
-    "nvim-treesitter/nvim-treesitter",
-    version = false, -- last release is way too old and doesn't work on Windows
-    build = ":TSUpdate",
-    event = { "LazyFile", "VeryLazy" },
-    dependencies = {
-      {
-        "nvim-treesitter/nvim-treesitter-textobjects",
-        config = function()
-          -- When in diff mode, we want to use the default
-          -- vim text objects c & C instead of the treesitter ones.
-          local move = require("nvim-treesitter.textobjects.move") ---@type table<string,fun(...)>
-          local configs = require("nvim-treesitter.configs")
-          for name, fn in pairs(move) do
-            if name:find("goto") == 1 then
-              move[name] = function(q, ...)
-                if vim.wo.diff then
-                  local config = configs.get_module("textobjects.move")[name] ---@type table<string,string>
-                  for key, query in pairs(config or {}) do
-                    if q == query and key:find("[%]%[][cC]") then
-                      vim.cmd("normal! " .. key)
-                      return
-                    end
-                  end
-                end
-                return fn(q, ...)
-              end
-            end
-          end
-        end,
-      },
+  "nvim-treesitter/nvim-treesitter",
+  branch = "main",
+  version = false, -- last release is way too old and doesn't work on Windows
+  build = function()
+    local TS = require("nvim-treesitter")
+    if not TS.get_installed then
+      LazyVim.error("Please restart Neovim and run `:TSUpdate` to use the `nvim-treesitter` **main** branch.")
+      return
+    end
+    LazyVim.treesitter.ensure_treesitter_cli(function()
+      TS.update(nil, { summary = true })
+    end)
+  end,
+  lazy = vim.fn.argc(-1) == 0, -- load treesitter early when opening a file from the cmdline
+  event = { "LazyFile", "VeryLazy" },
+  cmd = { "TSUpdate", "TSInstall", "TSLog", "TSUninstall" },
+  opts_extend = { "ensure_installed" },
+  ---@class lazyvim.TSConfig: TSConfig
+  opts = {
+    -- LazyVim config for treesitter
+    indent = { enable = true },
+    highlight = { enable = true },
+    folds = { enable = true },
+    ensure_installed = {
+      "bash",
+      "c",
+      "diff",
+      "html",
+      "javascript",
+      "jsdoc",
+      "json",
+      "jsonc",
+      "lua",
+      "luadoc",
+      "luap",
+      "markdown",
+      "markdown_inline",
+      "printf",
+      "python",
+      "query",
+      "regex",
+      "toml",
+      "tsx",
+      "typescript",
+      "vim",
+      "vimdoc",
+      "xml",
+      "yaml",
     },
-    cmd = { "TSUpdateSync" },
-    keys = {
-      { "<c-space>", desc = "Increment selection" },
-      { "<bs>",      desc = "Decrement selection", mode = "x" },
-    },
-    ---@type TSConfig
-    ---@diagnostic disable-next-line: missing-fields
-    opts = {
-      highlight = { enable = true },
-      indent = { enable = true },
-      ensure_installed = {
-        "bash",
-        "c",
-        "diff",
-        "hcl",
-        "html",
-        "javascript",
-        "jsdoc",
-        "json",
-        "lua",
-        "luadoc",
-        "luap",
-        "markdown",
-        "markdown_inline",
-        "python",
-        "query",
-        "regex",
-        "terraform",
-        "toml",
-        "tsx",
-        "typescript",
-        "vim",
-        "vimdoc",
-        "yaml",
-      },
-      incremental_selection = {
-        enable = true,
-        keymaps = {
-          init_selection = "<C-space>",
-          node_incremental = "<C-space>",
-          scope_incremental = false,
-          node_decremental = "<bs>",
-        },
-      },
-      textobjects = {
-        move = {
-          enable = true,
-          goto_next_start = { ["]f"] = "@function.outer", ["]c"] = "@class.outer" },
-          goto_next_end = { ["]F"] = "@function.outer", ["]C"] = "@class.outer" },
-          goto_previous_start = { ["[f"] = "@function.outer", ["[c"] = "@class.outer" },
-          goto_previous_end = { ["[F"] = "@function.outer", ["[C"] = "@class.outer" },
-        },
-      },
-    },
-    ---@param opts TSConfig
-    config = function(_, opts)
-      if type(opts.ensure_installed) == "table" then
-        ---@type table<string, boolean>
-        local added = {}
-        for i = 1, #opts.ensure_installed do
-          local v = opts.ensure_installed[i]
-          added[v] = true
-        end
-        opts.ensure_installed = added
-      end
-      require("nvim-treesitter.configs").setup(opts)
-    end,
   },
+  ---@param opts lazyvim.TSConfig
+  config = function(_, opts)
+    local TS = require("nvim-treesitter")
+
+    setmetatable(require("nvim-treesitter.install"), {
+      __newindex = function(_, k)
+        if k == "compilers" then
+          vim.schedule(function()
+            LazyVim.error({
+              "Setting custom compilers for `nvim-treesitter` is no longer supported.",
+              "",
+              "For more info, see:",
+              "- [compilers](https://docs.rs/cc/latest/cc/#compile-time-requirements)",
+            })
+          end)
+        end
+      end,
+    })
+
+    -- some quick sanity checks
+    if not TS.get_installed then
+      return LazyVim.error("Please use `:Lazy` and update `nvim-treesitter`")
+    elseif type(opts.ensure_installed) ~= "table" then
+      return LazyVim.error("`nvim-treesitter` opts.ensure_installed must be a table")
+    end
+
+    -- setup treesitter
+    TS.setup(opts)
+    LazyVim.treesitter.get_installed(true) -- initialize the installed langs
+
+    -- install missing parsers
+    local install = vim.tbl_filter(function(lang)
+      return not LazyVim.treesitter.have(lang)
+    end, opts.ensure_installed or {})
+    if #install > 0 then
+      LazyVim.treesitter.ensure_treesitter_cli(function()
+        TS.install(install, { summary = true }):await(function()
+          LazyVim.treesitter.get_installed(true) -- refresh the installed langs
+        end)
+      end)
+    end
+
+    vim.api.nvim_create_autocmd("FileType", {
+      group = vim.api.nvim_create_augroup("lazyvim_treesitter", { clear = true }),
+      callback = function(ev)
+        if not LazyVim.treesitter.have(ev.match) then
+          return
+        end
+
+        -- highlighting
+        if vim.tbl_get(opts, "highlight", "enable") ~= false then
+          pcall(vim.treesitter.start)
+        end
+
+        -- indents
+        if vim.tbl_get(opts, "indent", "enable") ~= false and LazyVim.treesitter.have(ev.match, "indents") then
+          LazyVim.set_default("indentexpr", "v:lua.LazyVim.treesitter.indentexpr()")
+        end
+
+        -- folds
+        if vim.tbl_get(opts, "folds", "enable") ~= false and LazyVim.treesitter.have(ev.match, "folds") then
+          if LazyVim.set_default("foldmethod", "expr") then
+            LazyVim.set_default("foldexpr", "v:lua.LazyVim.treesitter.foldexpr()")
+          end
+        end
+      end,
+    })
+  end,
 }
